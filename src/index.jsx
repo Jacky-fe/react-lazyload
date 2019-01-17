@@ -12,21 +12,20 @@ import throttle from './utils/throttle';
 import decorator from './decorator';
 
 const defaultBoundingClientRect = { top: 0, height: 0 };
-const LISTEN_FLAG = 'data-lazyload-listened';
 const listeners = [];
 let pending = [];
 let currentScrollTop = window.scrollY;
 let windowInnerHeight = window.innerHeight || document.documentElement.clientHeight;
 const containerList = [];
 
-const getOffsetTop = function (node, parent) {
-  if (node.parentNode === parent) {
+const getOffsetTop = function getOffsetTop(node, parent) {
+  if (node.offsetParent === parent || node.offsetParent === null) {
     return node.offsetTop || 0;
   }
-  return node.offsetTop + getOffsetTop(node.parentNode, parent);
+  return node.offsetTop + getOffsetTop(node.offsetParent, parent);
 };
 
-const getNodeRect = function (node, parent) {
+const getNodeRect = function getNodeRect(node, parent) {
   return {
     height: node.clientHeight,
     top: getOffsetTop(node, parent || document.getRootNode())
@@ -49,8 +48,6 @@ const checkOverflowVisible = function checkOverflowVisible(component, container)
   const offsets = Array.isArray(component.props.offset) ?
                 component.props.offset :
                 [component.props.offset, component.props.offset]; // Be compatible with previous API
-  console.log(parentHeight, top, height, offsets, container.scrollTop);
-  console.log((top - offsets[0] <= parentHeight + container.scrollTop), (top + height + offsets[1] >= container.scrollTop));
   return (top - offsets[0] <= parentHeight + container.scrollTop) &&
          (top + height + offsets[1] >= container.scrollTop);
 };
@@ -82,6 +79,7 @@ const getContainer = (parent) => {
   const newContainer = {
     parent,
     scrollTop: 0,
+    components: []
   };
   containerList.push(newContainer);
   return newContainer;
@@ -89,7 +87,6 @@ const getContainer = (parent) => {
 
 const pushToContainer = (component, parent) => {
   const container = getContainer(parent);
-  container.components = container.components || [];
   const index = container.components.findIndex(item => item === component);
   if (index >= 0) {
     container.components[index] = component;
@@ -97,7 +94,6 @@ const pushToContainer = (component, parent) => {
     container.components.push(component);
   }
   const visible = checkOverflowVisible(component, container);
-  console.log(visible);
   resetComponentVisible(visible, component);
 };
 
@@ -159,7 +155,6 @@ const checkNormalVisible = function checkNormalVisible(component) {
   const offsets = Array.isArray(component.props.offset) ?
                 component.props.offset :
                 [component.props.offset, component.props.offset]; // Be compatible with previous API
-
   return (top - offsets[0] <= currentScrollTop + windowInnerHeight) &&
          (top + elementHeight + offsets[1] >= currentScrollTop);
 };
@@ -172,19 +167,7 @@ const checkNormalVisible = function checkNormalVisible(component) {
  * @param  {React} component   React component that respond to scroll and resize
  */
 const checkVisible = function checkVisible(component) {
-  const node = ReactDom.findDOMNode(component);
-  if (!(node instanceof HTMLElement)) {
-    return;
-  }
-
-  const parent = scrollParent(node);
-  const isOverflow = component.props.overflow &&
-                     parent !== node.ownerDocument &&
-                     parent !== document &&
-                     parent !== document.documentElement;
-  const visible = isOverflow ?
-                  checkOverflowVisible(component, parent) :
-                  checkNormalVisible(component);
+  const visible = checkNormalVisible(component);
   resetComponentVisible(visible, component);
 };
 
@@ -272,12 +255,11 @@ class LazyLoad extends Component {
         this.clientRect = defaultBoundingClientRect;
       }
       if (parent && typeof parent.getAttribute === 'function') {
-        const listenerCount = 1 + (+parent.getAttribute(LISTEN_FLAG));
-        if (listenerCount === 1) {
+        const container = getContainer(parent);
+        if (container.components.length === 0) {
           setContainerNodeRect(parent);
           parent.addEventListener('scroll', finalLazyLoadHandler, passiveEvent);
         }
-        parent.setAttribute(LISTEN_FLAG, listenerCount);
         pushToContainer(this, parent);
       }
     } else {
@@ -310,16 +292,12 @@ class LazyLoad extends Component {
     if (this.props.overflow) {
       const parent = scrollParent(ReactDom.findDOMNode(this));
       if (parent && typeof parent.getAttribute === 'function') {
-        const listenerCount = (+parent.getAttribute(LISTEN_FLAG)) - 1;
         const container = getContainer(parent);
         if (container) {
           container.components.splice(container.components.findIndex(item => item === this), 1);
-          if (listenerCount === 0) {
+          if (container.components.length === 0) {
             parent.removeEventListener('scroll', finalLazyLoadHandler, passiveEvent);
-            parent.removeAttribute(LISTEN_FLAG);
             containerList.splice(containerList.findIndex(item => item.parent === parent), 1);
-          } else {
-            parent.setAttribute(LISTEN_FLAG, listenerCount);
           }
         }
       }
